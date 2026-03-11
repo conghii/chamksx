@@ -1,0 +1,1239 @@
+/**
+ * ========================================================================
+ * POSITIVE JAR — HRM & PRODUCTION MANAGEMENT API
+ * Google Apps Script — Web App
+ * Phục vụ cả Worker App + Admin App
+ * ========================================================================
+ */
+
+// ==================== CONFIG ====================
+const SHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+const TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+const TABS = {
+  EMPLOYEES: 'employees',
+  ATTENDANCE: 'attendance',
+  SCHEDULES: 'schedules',
+  PRODUCT_LINES: 'product_lines',
+  PRODUCTION_ORDERS: 'production_orders',
+  TASKS: 'tasks',
+  SETTINGS: 'settings',
+};
+
+// ==================== MAIN HANDLERS ====================
+
+function doGet(e) {
+  return handleRequest(e, 'GET');
+}
+
+function doPost(e) {
+  return handleRequest(e, 'POST');
+}
+
+function handleRequest(e, method) {
+  try {
+    const params = method === 'GET' ? e.parameter : JSON.parse(e.postData.contents);
+    const action = params.action;
+
+    if (!action) {
+      return jsonResponse(false, null, 'Missing action parameter');
+    }
+
+    const result = routeAction(action, params);
+    return jsonResponse(true, result);
+  } catch (err) {
+    logError(err);
+    return jsonResponse(false, null, err.message || 'Internal server error');
+  }
+}
+
+function routeAction(action, params) {
+  const routes = {
+    // Employees
+    getEmployees: () => getEmployees(),
+    getEmployee: () => getEmployee(params.id),
+    addEmployee: () => addEmployee(params.data || params),
+    updateEmployee: () => updateEmployee(params.id, params.data || params),
+    toggleEmployeeStatus: () => toggleEmployeeStatus(params.id),
+
+    // Attendance
+    checkIn: () => checkIn(params.employee_id, params.shift),
+    checkOut: () => checkOut(params.attendance_id, parseInt(params.lunch_break_minutes)),
+    getTodayAttendance: () => getTodayAttendance(),
+    getEmployeeTodayStatus: () => getEmployeeTodayStatus(params.employee_id),
+    getMonthlyAttendance: () => getMonthlyAttendance(parseInt(params.month), parseInt(params.year)),
+    getEmployeeMonthly: () => getEmployeeMonthly(params.employee_id, parseInt(params.month), parseInt(params.year)),
+    updateAttendance: () => updateAttendance(params.id, params.data || params),
+
+    // Schedules
+    getWeekSchedule: () => getWeekSchedule(params.start_date),
+    getEmployeeSchedule: () => getEmployeeSchedule(params.employee_id, params.start_date),
+    requestSchedule: () => requestSchedule(params.employee_id, params.date, params.shift, params.note),
+    cancelScheduleRequest: () => cancelScheduleRequest(params.id),
+    getPendingSchedules: () => getPendingSchedules(),
+    approveSchedule: () => approveSchedule(params.id, params.approved_by),
+    rejectSchedule: () => rejectSchedule(params.id, params.reason),
+    bulkApproveSchedules: () => bulkApproveSchedules(params.ids, params.approved_by),
+
+    // Task Assignments (Việc chung)
+    getTodayTasks: () => getTodayTasks(),
+    updateTaskProgress: () => updateTaskProgress(params.task_id, params.employee_id, parseInt(params.step_completed), parseInt(params.quantity_done) || 0, params.notes),
+    addTaskQuantity: () => addTaskQuantity(params.task_id, params.employee_id, parseInt(params.quantity), params.notes),
+    getTaskHistory: () => getTaskHistory(params.order_id),
+    assignTask: () => assignTask(params.data || params), // Giữ lại cho admin
+
+    // Production
+    getOrders: () => getOrders(),
+    getOrder: () => getOrder(params.id),
+    addOrder: () => addOrder(params.data || params),
+    updateOrderStage: () => updateOrderStage(params.id, parseInt(params.new_stage)),
+    updateOrderStatus: () => updateOrderStatus(params.id, params.status),
+    getProductLines: () => getProductLines(),
+    addProductLine: () => addProductLine(params.data || params),
+    updateProductLine: () => updateProductLine(params.id, params.data || params),
+
+    // Settings
+    getSettings: () => getSettings(),
+    updateSetting: () => updateSetting(params.key, params.value),
+    updateMultipleSettings: () => updateMultipleSettings(params.data || params),
+
+    // Dashboard
+    getDashboardStats: () => getDashboardStats(),
+
+    // Worker Home
+    getWorkerHomeData: () => getWorkerHomeData(params.employee_id),
+  };
+
+  if (!routes[action]) {
+    throw new Error('Unknown action: ' + action);
+  }
+
+  return routes[action]();
+}
+
+// ==================== RESPONSE HELPERS ====================
+
+function jsonResponse(success, data, error) {
+  const output = JSON.stringify({ success, data: data || null, error: error || null });
+  return ContentService.createTextOutput(output)
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function logError(err) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let logSheet = ss.getSheetByName('logs');
+    if (!logSheet) {
+      logSheet = ss.insertSheet('logs');
+      logSheet.appendRow(['timestamp', 'error', 'stack']);
+    }
+    logSheet.appendRow([now(), err.message, err.stack]);
+  } catch (e) {
+    // Silent fail on log
+  }
+}
+
+// ==================== UTILITY FUNCTIONS ====================
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+}
+
+function now() {
+  return Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm:ss');
+}
+
+function today() {
+  return Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd');
+}
+
+function nowTime() {
+  return Utilities.formatDate(new Date(), TIMEZONE, 'HH:mm');
+}
+
+function getSheet(tabName) {
+  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tabName);
+}
+
+function getSheetData(tabName) {
+  const sheet = getSheet(tabName);
+  if (!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+  const headers = data[0].map(h => String(h).trim().toLowerCase());
+  return data.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((h, i) => {
+      let val = row[i];
+      // Convert Date objects to string
+      if (val instanceof Date) {
+        // Check if it looks like a time-only value (date part is default)
+        const hours = val.getHours();
+        const minutes = val.getMinutes();
+        if (val.getFullYear() === 1899 || val.getFullYear() === 1900) {
+          val = Utilities.formatDate(val, TIMEZONE, 'HH:mm');
+        } else {
+          val = Utilities.formatDate(val, TIMEZONE, 'yyyy-MM-dd');
+        }
+      }
+      if (val === true) val = 'TRUE';
+      if (val === false) val = 'FALSE';
+      obj[h] = val;
+    });
+    return obj;
+  }).filter(row => row.id && String(row.id).trim() !== '');
+}
+
+function findRowIndex(tabName, id) {
+  const sheet = getSheet(tabName);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(id).trim()) {
+      return i + 1; // 1-indexed row number
+    }
+  }
+  return -1;
+}
+
+function getSettingValue(key) {
+  const settings = getSheetData(TABS.SETTINGS);
+  const setting = settings.find(s => s.key === key);
+  return setting ? setting.value : null;
+}
+
+function parseTimeToMinutes(timeStr) {
+  if (!timeStr) return 0;
+  const parts = String(timeStr).split(':');
+  return parseInt(parts[0]) * 60 + parseInt(parts[1] || 0);
+}
+
+// ==================== EMPLOYEES ====================
+
+function getEmployees() {
+  const data = getSheetData(TABS.EMPLOYEES);
+  return data.filter(e => e.status === 'active').map(formatEmployee);
+}
+
+function getEmployee(id) {
+  const data = getSheetData(TABS.EMPLOYEES);
+  const emp = data.find(e => String(e.id) === String(id));
+  if (!emp) throw new Error('Employee not found: ' + id);
+  return formatEmployee(emp);
+}
+
+function getAllEmployees() {
+  return getSheetData(TABS.EMPLOYEES).map(formatEmployee);
+}
+
+function formatEmployee(e) {
+  return {
+    id: String(e.id),
+    name: String(e.name || ''),
+    phone: String(e.phone || ''),
+    type: String(e.type || 'fulltime'),
+    skills: String(e.skills || '').split(',').map(s => s.trim()).filter(Boolean),
+    hourly_rate: Number(e.hourly_rate) || 0,
+    status: String(e.status || 'active'),
+    joined_date: String(e.joined_date || ''),
+    notes: String(e.notes || ''),
+  };
+}
+
+function addEmployee(data) {
+  const sheet = getSheet(TABS.EMPLOYEES);
+  const id = 'EMP' + generateId();
+  sheet.appendRow([
+    id,
+    data.name || '',
+    data.phone || '',
+    data.type || 'fulltime',
+    Array.isArray(data.skills) ? data.skills.join(',') : (data.skills || ''),
+    Number(data.hourly_rate) || 0,
+    'active',
+    data.joined_date || today(),
+    data.notes || '',
+  ]);
+  return { id, message: 'Employee added' };
+}
+
+function updateEmployee(id, data) {
+  const sheet = getSheet(TABS.EMPLOYEES);
+  const rowIndex = findRowIndex(TABS.EMPLOYEES, id);
+  if (rowIndex === -1) throw new Error('Employee not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  headers.forEach((h, i) => {
+    const key = String(h).trim().toLowerCase();
+    if (key === 'id') return;
+    if (data[key] !== undefined) {
+      let val = data[key];
+      if (key === 'skills' && Array.isArray(val)) val = val.join(',');
+      row[i] = val;
+    }
+  });
+
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  return { id, message: 'Employee updated' };
+}
+
+function toggleEmployeeStatus(id) {
+  const sheet = getSheet(TABS.EMPLOYEES);
+  const rowIndex = findRowIndex(TABS.EMPLOYEES, id);
+  if (rowIndex === -1) throw new Error('Employee not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const statusCol = headers.findIndex(h => String(h).trim().toLowerCase() === 'status') + 1;
+  const currentStatus = sheet.getRange(rowIndex, statusCol).getValue();
+  const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+  sheet.getRange(rowIndex, statusCol).setValue(newStatus);
+
+  return { id, status: newStatus };
+}
+
+// ==================== ATTENDANCE ====================
+
+function checkIn(employeeId, shift) {
+  const sheet = getSheet(TABS.ATTENDANCE);
+  const emp = getEmployee(employeeId);
+  const todayStr = today();
+  const currentTime = nowTime();
+  const id = 'ATT' + generateId();
+
+  // Determine default lunch break
+  let lunchDefault = 0;
+  if (shift === 'morning') lunchDefault = Number(getSettingValue('lunch_break_morning')) || 60;
+  else if (shift === 'afternoon') lunchDefault = Number(getSettingValue('lunch_break_afternoon')) || 0;
+  else if (shift === 'night') lunchDefault = Number(getSettingValue('lunch_break_night')) || 0;
+
+  // Determine if late
+  let isLate = false;
+  let shiftStart = '';
+  const lateThreshold = Number(getSettingValue('late_threshold_minutes')) || 15;
+
+  if (shift === 'morning') shiftStart = getSettingValue('morning_shift_start') || '06:00';
+  else if (shift === 'afternoon') shiftStart = getSettingValue('afternoon_shift_start') || '14:00';
+  else if (shift === 'night') shiftStart = getSettingValue('night_shift_start') || '22:00';
+
+  const checkInMinutes = parseTimeToMinutes(currentTime);
+  const shiftStartMinutes = parseTimeToMinutes(shiftStart);
+  const thresholdMinutes = shiftStartMinutes + lateThreshold;
+
+  // Handle night shift crossing midnight
+  if (shift === 'night' && checkInMinutes < 12 * 60) {
+    // After midnight - not late
+    isLate = false;
+  } else {
+    isLate = checkInMinutes > thresholdMinutes;
+  }
+
+  const status = isLate ? 'late' : 'on_time';
+
+  sheet.appendRow([
+    id,
+    employeeId,
+    emp.name,
+    todayStr,
+    shift,
+    currentTime,
+    '',   // check_out
+    lunchDefault,
+    0,    // work_hours
+    0,    // overtime_hours
+    status,
+    isLate ? 'Trễ ' + (checkInMinutes - shiftStartMinutes) + ' phút' : '',
+  ]);
+
+  return {
+    attendance_id: id,
+    check_in_time: currentTime,
+    is_late: isLate,
+    late_minutes: isLate ? (checkInMinutes - shiftStartMinutes) : 0,
+    lunch_break_default: lunchDefault,
+    status: status,
+  };
+}
+
+function checkOut(attendanceId, lunchBreakMinutes) {
+  const sheet = getSheet(TABS.ATTENDANCE);
+  const rowIndex = findRowIndex(TABS.ATTENDANCE, attendanceId);
+  if (rowIndex === -1) throw new Error('Attendance record not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  const checkInTime = String(row[hMap['check_in']]);
+  const currentTime = nowTime();
+  const standardHours = Number(getSettingValue('standard_hours')) || 8;
+
+  // Handle check_in as Date object
+  let checkInStr = checkInTime;
+  if (row[hMap['check_in']] instanceof Date) {
+    checkInStr = Utilities.formatDate(row[hMap['check_in']], TIMEZONE, 'HH:mm');
+  }
+
+  // Calculate hours
+  const checkInMinutes = parseTimeToMinutes(checkInStr);
+  const checkOutMinutes = parseTimeToMinutes(currentTime);
+
+  let rawMinutes = checkOutMinutes - checkInMinutes;
+  if (rawMinutes < 0) rawMinutes += 24 * 60; // Handle overnight
+
+  const lunchMinutes = (lunchBreakMinutes !== undefined && lunchBreakMinutes !== null)
+    ? lunchBreakMinutes
+    : Number(row[hMap['lunch_break_minutes']]) || 0;
+
+  let workMinutes = rawMinutes - lunchMinutes;
+  if (workMinutes < 0) workMinutes = 0;
+
+  let workHours = Math.round(workMinutes / 60 * 100) / 100;
+  let overtimeHours = 0;
+
+  if (workHours > standardHours) {
+    overtimeHours = Math.round((workHours - standardHours) * 100) / 100;
+    workHours = standardHours;
+  }
+
+  // Update row
+  row[hMap['check_out']] = currentTime;
+  row[hMap['lunch_break_minutes']] = lunchMinutes;
+  row[hMap['work_hours']] = workHours;
+  row[hMap['overtime_hours']] = overtimeHours;
+
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+
+  return {
+    check_out_time: currentTime,
+    work_hours: workHours,
+    overtime_hours: overtimeHours,
+    total_raw: Math.round(rawMinutes / 60 * 100) / 100,
+    lunch_deducted: lunchMinutes,
+  };
+}
+
+function getTodayAttendance() {
+  const todayStr = today();
+  const data = getSheetData(TABS.ATTENDANCE);
+  return data.filter(a => String(a.date) === todayStr).map(formatAttendance);
+}
+
+function getEmployeeTodayStatus(employeeId) {
+  const todayStr = today();
+  const data = getSheetData(TABS.ATTENDANCE);
+  const record = data.find(a =>
+    String(a.employee_id) === String(employeeId) && String(a.date) === todayStr
+  );
+  if (!record) return { checked_in: false };
+  return {
+    checked_in: true,
+    checked_out: !!record.check_out && String(record.check_out).trim() !== '',
+    attendance: formatAttendance(record),
+  };
+}
+
+function getMonthlyAttendance(month, year) {
+  const data = getSheetData(TABS.ATTENDANCE);
+  return data.filter(a => {
+    const d = String(a.date).split('-');
+    return parseInt(d[1]) === month && parseInt(d[0]) === year;
+  }).map(formatAttendance);
+}
+
+function getEmployeeMonthly(employeeId, month, year) {
+  const data = getSheetData(TABS.ATTENDANCE);
+  return data.filter(a => {
+    const d = String(a.date).split('-');
+    return String(a.employee_id) === String(employeeId) &&
+      parseInt(d[1]) === month && parseInt(d[0]) === year;
+  }).map(formatAttendance);
+}
+
+function updateAttendance(id, data) {
+  const sheet = getSheet(TABS.ATTENDANCE);
+  const rowIndex = findRowIndex(TABS.ATTENDANCE, id);
+  if (rowIndex === -1) throw new Error('Attendance record not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  // Update fields
+  ['check_in', 'check_out', 'lunch_break_minutes', 'work_hours', 'overtime_hours', 'status', 'note', 'shift'].forEach(key => {
+    if (data[key] !== undefined && hMap[key] !== undefined) {
+      row[hMap[key]] = data[key];
+    }
+  });
+
+  // Recalculate work hours if times changed
+  if (data.check_in || data.check_out) {
+    const ciStr = String(row[hMap['check_in']]);
+    const coStr = String(row[hMap['check_out']]);
+    if (ciStr && coStr) {
+      const standardHours = Number(getSettingValue('standard_hours')) || 8;
+      const ciMin = parseTimeToMinutes(ciStr);
+      const coMin = parseTimeToMinutes(coStr);
+      let rawMin = coMin - ciMin;
+      if (rawMin < 0) rawMin += 24 * 60;
+      const lunch = Number(row[hMap['lunch_break_minutes']]) || 0;
+      let workMin = rawMin - lunch;
+      if (workMin < 0) workMin = 0;
+      let wh = Math.round(workMin / 60 * 100) / 100;
+      let ot = 0;
+      if (wh > standardHours) { ot = Math.round((wh - standardHours) * 100) / 100; wh = standardHours; }
+      row[hMap['work_hours']] = wh;
+      row[hMap['overtime_hours']] = ot;
+    }
+  }
+
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  return { id, message: 'Attendance updated' };
+}
+
+function formatAttendance(a) {
+  return {
+    id: String(a.id),
+    employee_id: String(a.employee_id),
+    employee_name: String(a.employee_name || ''),
+    date: String(a.date),
+    shift: String(a.shift || ''),
+    check_in: String(a.check_in || ''),
+    check_out: String(a.check_out || ''),
+    lunch_break_minutes: Number(a.lunch_break_minutes) || 0,
+    work_hours: Number(a.work_hours) || 0,
+    overtime_hours: Number(a.overtime_hours) || 0,
+    status: String(a.status || ''),
+    note: String(a.note || ''),
+  };
+}
+
+// ==================== SCHEDULES ====================
+
+function getWeekSchedule(startDate) {
+  const data = getSheetData(TABS.SCHEDULES);
+  const start = new Date(startDate);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const startStr = Utilities.formatDate(start, TIMEZONE, 'yyyy-MM-dd');
+  const endStr = Utilities.formatDate(end, TIMEZONE, 'yyyy-MM-dd');
+
+  return data.filter(s => {
+    const d = String(s.date);
+    return d >= startStr && d <= endStr;
+  }).map(formatSchedule);
+}
+
+function getEmployeeSchedule(employeeId, startDate) {
+  const data = getSheetData(TABS.SCHEDULES);
+  const start = new Date(startDate);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const startStr = Utilities.formatDate(start, TIMEZONE, 'yyyy-MM-dd');
+  const endStr = Utilities.formatDate(end, TIMEZONE, 'yyyy-MM-dd');
+
+  return data.filter(s => {
+    const d = String(s.date);
+    return String(s.employee_id) === String(employeeId) && d >= startStr && d <= endStr;
+  }).map(formatSchedule);
+}
+
+function requestSchedule(employeeId, date, shift, note) {
+  const sheet = getSheet(TABS.SCHEDULES);
+  const emp = getEmployee(employeeId);
+  const id = 'SCH' + generateId();
+
+  // Check duplicate
+  const existing = getSheetData(TABS.SCHEDULES);
+  const dup = existing.find(s =>
+    String(s.employee_id) === String(employeeId) &&
+    String(s.date) === String(date) &&
+    String(s.shift) === String(shift) &&
+    s.status !== 'rejected'
+  );
+  if (dup) throw new Error('Đã đăng ký ca này rồi');
+
+  sheet.appendRow([
+    id, employeeId, emp.name, date, shift, 'pending', '', '', note || '', now()
+  ]);
+
+  return { id, message: 'Schedule requested' };
+}
+
+function cancelScheduleRequest(id) {
+  const sheet = getSheet(TABS.SCHEDULES);
+  const rowIndex = findRowIndex(TABS.SCHEDULES, id);
+  if (rowIndex === -1) throw new Error('Schedule not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  if (String(row[hMap['status']]) !== 'pending') {
+    throw new Error('Chỉ có thể hủy đăng ký đang chờ duyệt');
+  }
+
+  sheet.deleteRow(rowIndex);
+  return { message: 'Schedule cancelled' };
+}
+
+function getPendingSchedules() {
+  const data = getSheetData(TABS.SCHEDULES);
+  return data.filter(s => String(s.status) === 'pending').map(formatSchedule);
+}
+
+function approveSchedule(id, approvedBy) {
+  const sheet = getSheet(TABS.SCHEDULES);
+  const rowIndex = findRowIndex(TABS.SCHEDULES, id);
+  if (rowIndex === -1) throw new Error('Schedule not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  row[hMap['status']] = 'approved';
+  row[hMap['approved_by']] = approvedBy || 'Admin';
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+
+  return { id, message: 'Schedule approved' };
+}
+
+function rejectSchedule(id, reason) {
+  const sheet = getSheet(TABS.SCHEDULES);
+  const rowIndex = findRowIndex(TABS.SCHEDULES, id);
+  if (rowIndex === -1) throw new Error('Schedule not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  row[hMap['status']] = 'rejected';
+  row[hMap['reject_reason']] = reason || '';
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+
+  return { id, message: 'Schedule rejected' };
+}
+
+function bulkApproveSchedules(ids, approvedBy) {
+  if (!Array.isArray(ids)) ids = JSON.parse(ids);
+  const results = ids.map(id => {
+    try {
+      return approveSchedule(id, approvedBy);
+    } catch (e) {
+      return { id, error: e.message };
+    }
+  });
+  return results;
+}
+
+function formatSchedule(s) {
+  return {
+    id: String(s.id),
+    employee_id: String(s.employee_id),
+    employee_name: String(s.employee_name || ''),
+    date: String(s.date),
+    shift: String(s.shift || ''),
+    status: String(s.status || 'pending'),
+    approved_by: String(s.approved_by || ''),
+    reject_reason: String(s.reject_reason || ''),
+    note: String(s.note || ''),
+    created_at: String(s.created_at || ''),
+  };
+}
+
+// ==================== TASK ASSIGNMENTS ====================
+
+function assignTask(data) {
+  const sheet = getSheet(TABS.TASK_ASSIGNMENTS);
+  const id = 'TASK' + generateId();
+  const emp = getEmployee(data.employee_id);
+
+  // Get order info
+  let orderCode = data.order_code || '';
+  let productLineName = data.product_line_name || '';
+  if (data.order_id) {
+    try {
+      const order = getOrder(data.order_id);
+      orderCode = order.order_code;
+      productLineName = order.product_line_name;
+    } catch (e) {}
+  }
+
+  sheet.appendRow([
+    id,
+    data.order_id || '',
+    orderCode,
+    productLineName,
+    Number(data.stage_number) || 1,
+    data.stage_name || '',
+    data.employee_id,
+    emp.name,
+    data.date || today(),
+    Number(data.target_quantity) || 0,
+    'assigned',
+    data.notes || '',
+  ]);
+
+  return { id, message: 'Task assigned' };
+}
+
+function getEmployeeTasks(employeeId, date) {
+  const data = getSheetData(TABS.TASK_ASSIGNMENTS);
+  const dateStr = date || today();
+  return data.filter(t =>
+    String(t.employee_id) === String(employeeId) && String(t.date) === dateStr
+  ).map(formatTask);
+}
+
+function getTasksByOrder(orderId) {
+  const data = getSheetData(TABS.TASK_ASSIGNMENTS);
+  return data.filter(t => String(t.order_id) === String(orderId)).map(formatTask);
+}
+
+function updateTaskStatus(id, status) {
+  const sheet = getSheet(TABS.TASK_ASSIGNMENTS);
+  const rowIndex = findRowIndex(TABS.TASK_ASSIGNMENTS, id);
+  if (rowIndex === -1) throw new Error('Task not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const statusCol = headers.findIndex(h => String(h).trim().toLowerCase() === 'status') + 1;
+  sheet.getRange(rowIndex, statusCol).setValue(status);
+
+  return { id, status, message: 'Task status updated' };
+}
+
+function getAllTasksToday() {
+  const todayStr = today();
+  const data = getSheetData(TABS.TASK_ASSIGNMENTS);
+  return data.filter(t => String(t.date) === todayStr).map(formatTask);
+}
+
+function formatTask(t) {
+  return {
+    id: String(t.id),
+    order_id: String(t.order_id || ''),
+    order_code: String(t.order_code || ''),
+    product_line_name: String(t.product_line_name || ''),
+    stage_number: Number(t.stage_number) || 0,
+    stage_name: String(t.stage_name || ''),
+    employee_id: String(t.employee_id || ''),
+    employee_name: String(t.employee_name || ''),
+    date: String(t.date),
+    target_quantity: Number(t.target_quantity) || 0,
+    status: String(t.status || 'assigned'),
+    notes: String(t.notes || ''),
+  };
+}
+
+// ==================== DAILY REPORTS ====================
+
+function submitReport(data) {
+  const sheet = getSheet(TABS.DAILY_REPORTS);
+  const id = 'RPT' + generateId();
+  const emp = getEmployee(data.employee_id);
+
+  let orderCode = data.order_code || '';
+  let productLine = data.product_line || '';
+  if (data.order_id) {
+    try {
+      const order = getOrder(data.order_id);
+      orderCode = order.order_code;
+      productLine = order.product_line_name;
+    } catch (e) {}
+  }
+
+  sheet.appendRow([
+    id,
+    data.employee_id,
+    emp.name,
+    data.date || today(),
+    data.order_id || '',
+    orderCode,
+    productLine,
+    data.stage_name || '',
+    Number(data.quantity_completed) || 0,
+    data.quality_notes || '',
+    data.issues || '',
+    now(),
+  ]);
+
+  return { id, message: 'Report submitted' };
+}
+
+function getEmployeeReports(employeeId, date) {
+  const dateStr = date || today();
+  const data = getSheetData(TABS.DAILY_REPORTS);
+  return data.filter(r =>
+    String(r.employee_id) === String(employeeId) && String(r.date) === dateStr
+  ).map(formatReport);
+}
+
+function getDailyReports(date) {
+  const dateStr = date || today();
+  const data = getSheetData(TABS.DAILY_REPORTS);
+  return data.filter(r => String(r.date) === dateStr).map(formatReport);
+}
+
+function getOrderReports(orderId) {
+  const data = getSheetData(TABS.DAILY_REPORTS);
+  return data.filter(r => String(r.order_id) === String(orderId)).map(formatReport);
+}
+
+function formatReport(r) {
+  return {
+    id: String(r.id),
+    employee_id: String(r.employee_id || ''),
+    employee_name: String(r.employee_name || ''),
+    date: String(r.date),
+    order_id: String(r.order_id || ''),
+    order_code: String(r.order_code || ''),
+    product_line: String(r.product_line || ''),
+    stage_name: String(r.stage_name || ''),
+    quantity_completed: Number(r.quantity_completed) || 0,
+    quality_notes: String(r.quality_notes || ''),
+    issues: String(r.issues || ''),
+    created_at: String(r.created_at || ''),
+  };
+}
+
+// ==================== PRODUCTION ORDERS ====================
+
+function getOrders() {
+  return getSheetData(TABS.PRODUCTION_ORDERS).map(formatOrder);
+}
+
+function getOrder(id) {
+  const data = getSheetData(TABS.PRODUCTION_ORDERS);
+  const order = data.find(o => String(o.id) === String(id));
+  if (!order) throw new Error('Order not found: ' + id);
+  return formatOrder(order);
+}
+
+function addOrder(data) {
+  const sheet = getSheet(TABS.PRODUCTION_ORDERS);
+  const id = 'ORD' + generateId();
+  const year = new Date().getFullYear();
+
+  // Auto-generate order code
+  const existing = getSheetData(TABS.PRODUCTION_ORDERS);
+  const yearOrders = existing.filter(o => String(o.order_code).includes(String(year)));
+  const nextNum = String(yearOrders.length + 1).padStart(3, '0');
+  const orderCode = 'ORD-' + year + '-' + nextNum;
+
+  // Get product line name
+  let productLineName = data.product_line_name || '';
+  if (data.product_line_id) {
+    const pls = getSheetData(TABS.PRODUCT_LINES);
+    const pl = pls.find(p => String(p.id) === String(data.product_line_id));
+    if (pl) productLineName = pl.name;
+  }
+
+  sheet.appendRow([
+    id,
+    orderCode,
+    data.product_line_id || '',
+    productLineName,
+    Number(data.quantity) || 0,
+    1,  // current_stage
+    7,  // total_stages
+    data.deadline || '',
+    data.priority || 'medium',
+    'pending',
+    data.notes || '',
+    now(),
+    '',  // completed_at
+  ]);
+
+  return { id, order_code: orderCode, message: 'Order created' };
+}
+
+function updateOrderStage(id, newStage) {
+  const sheet = getSheet(TABS.PRODUCTION_ORDERS);
+  const rowIndex = findRowIndex(TABS.PRODUCTION_ORDERS, id);
+  if (rowIndex === -1) throw new Error('Order not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  row[hMap['current_stage']] = newStage;
+
+  if (newStage >= 7) {
+    row[hMap['status']] = 'completed';
+    row[hMap['completed_at']] = now();
+  } else if (newStage > 1) {
+    row[hMap['status']] = 'in_progress';
+  }
+
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  return { id, current_stage: newStage, message: 'Stage updated' };
+}
+
+function updateOrderStatus(id, status) {
+  const sheet = getSheet(TABS.PRODUCTION_ORDERS);
+  const rowIndex = findRowIndex(TABS.PRODUCTION_ORDERS, id);
+  if (rowIndex === -1) throw new Error('Order not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  row[hMap['status']] = status;
+  if (status === 'completed') row[hMap['completed_at']] = now();
+
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  return { id, status, message: 'Order status updated' };
+}
+
+function formatOrder(o) {
+  return {
+    id: String(o.id),
+    order_code: String(o.order_code || ''),
+    product_line_id: String(o.product_line_id || ''),
+    product_line_name: String(o.product_line_name || ''),
+    quantity: Number(o.quantity) || 0,
+    current_stage: Number(o.current_stage) || 1,
+    total_stages: Number(o.total_stages) || 7,
+    deadline: String(o.deadline || ''),
+    priority: String(o.priority || 'medium'),
+    status: String(o.status || 'pending'),
+    notes: String(o.notes || ''),
+    created_at: String(o.created_at || ''),
+    completed_at: String(o.completed_at || ''),
+  };
+}
+
+// ==================== PRODUCT LINES ====================
+
+function getProductLines() {
+  return getSheetData(TABS.PRODUCT_LINES).map(formatProductLine);
+}
+
+function addProductLine(data) {
+  const sheet = getSheet(TABS.PRODUCT_LINES);
+  const existing = getSheetData(TABS.PRODUCT_LINES);
+  const nextNum = String(existing.length + 1).padStart(3, '0');
+  const id = 'PL' + nextNum;
+
+  sheet.appendRow([
+    id,
+    data.name || '',
+    data.icon || '📦',
+    data.color || '#999999',
+    data.amazon_sku_prefix || '',
+    'TRUE',
+  ]);
+
+  return { id, message: 'Product line added' };
+}
+
+function updateProductLine(id, data) {
+  const sheet = getSheet(TABS.PRODUCT_LINES);
+  const rowIndex = findRowIndex(TABS.PRODUCT_LINES, id);
+  if (rowIndex === -1) throw new Error('Product line not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  headers.forEach((h, i) => {
+    const key = String(h).trim().toLowerCase();
+    if (key === 'id') return;
+    if (data[key] !== undefined) row[i] = data[key];
+  });
+
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  return { id, message: 'Product line updated' };
+}
+
+function formatProductLine(p) {
+  return {
+    id: String(p.id),
+    name: String(p.name || ''),
+    icon: String(p.icon || ''),
+    color: String(p.color || ''),
+    amazon_sku_prefix: String(p.amazon_sku_prefix || ''),
+    is_active: String(p.is_active) === 'TRUE',
+  };
+}
+
+// ==================== SETTINGS ====================
+
+function getSettings() {
+  return getSheetData(TABS.SETTINGS).map(s => ({
+    key: String(s.key),
+    value: String(s.value),
+    description: String(s.description || ''),
+  }));
+}
+
+function updateSetting(key, value) {
+  const sheet = getSheet(TABS.SETTINGS);
+  const data = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(key).trim()) {
+      sheet.getRange(i + 1, 2).setValue(value);
+      return { key, value, message: 'Setting updated' };
+    }
+  }
+
+  // Add new setting if not found
+  sheet.appendRow([key, value, '']);
+  return { key, value, message: 'Setting added' };
+}
+
+function updateMultipleSettings(data) {
+  if (typeof data === 'string') data = JSON.parse(data);
+  const results = [];
+
+  if (Array.isArray(data)) {
+    data.forEach(item => {
+      results.push(updateSetting(item.key, item.value));
+    });
+  } else {
+    Object.keys(data).forEach(key => {
+      if (key !== 'action') {
+        results.push(updateSetting(key, data[key]));
+      }
+    });
+  }
+
+  return results;
+}
+
+// ==================== DASHBOARD ====================
+
+function getDashboardStats() {
+  const todayStr = today();
+  const employees = getSheetData(TABS.EMPLOYEES).filter(e => e.status === 'active');
+  const todayAttendance = getSheetData(TABS.ATTENDANCE).filter(a => String(a.date) === todayStr);
+  const pendingSchedules = getSheetData(TABS.SCHEDULES).filter(s => String(s.status) === 'pending');
+  const orders = getSheetData(TABS.PRODUCTION_ORDERS);
+  const activeOrders = orders.filter(o => o.status === 'in_progress' || o.status === 'pending');
+  const todayReports = getSheetData(TABS.DAILY_REPORTS).filter(r => String(r.date) === todayStr);
+
+  // Orders near deadline (< 3 days)
+  const threeDaysLater = new Date();
+  threeDaysLater.setDate(threeDaysLater.getDate() + 3);
+  const threeDaysStr = Utilities.formatDate(threeDaysLater, TIMEZONE, 'yyyy-MM-dd');
+  const nearDeadline = activeOrders.filter(o => String(o.deadline) <= threeDaysStr && String(o.deadline) >= todayStr);
+
+  // Issues today
+  const issuesToday = todayReports.filter(r => String(r.issues).trim() !== '');
+
+  // Total work hours today
+  let totalWorkHours = 0;
+  let totalOvertime = 0;
+  todayAttendance.forEach(a => {
+    totalWorkHours += Number(a.work_hours) || 0;
+    totalOvertime += Number(a.overtime_hours) || 0;
+  });
+
+  // Attendance rate this week
+  const startOfWeek = new Date();
+  const dayOfWeek = startOfWeek.getDay() || 7;
+  startOfWeek.setDate(startOfWeek.getDate() - dayOfWeek + 1);
+  const weekStart = Utilities.formatDate(startOfWeek, TIMEZONE, 'yyyy-MM-dd');
+  const allAttendance = getSheetData(TABS.ATTENDANCE);
+  const weekAttendance = allAttendance.filter(a => String(a.date) >= weekStart && String(a.date) <= todayStr);
+  const workDaysThisWeek = Math.min(dayOfWeek, 5); // Max 5 work days
+  const expectedAttendance = employees.length * workDaysThisWeek;
+  const attendanceRate = expectedAttendance > 0
+    ? Math.round(weekAttendance.length / expectedAttendance * 100)
+    : 0;
+
+  return {
+    total_employees: employees.length,
+    employees_today: todayAttendance.length,
+    pending_schedules: pendingSchedules.length,
+    active_orders: activeOrders.length,
+    orders_near_deadline: nearDeadline.length,
+    total_reports_today: todayReports.length,
+    issues_today: issuesToday.length,
+    attendance_rate_this_week: Math.min(attendanceRate, 100),
+    total_work_hours_today: Math.round(totalWorkHours * 100) / 100,
+    total_overtime_today: Math.round(totalOvertime * 100) / 100,
+  };
+}
+
+// ==================== WORKER HOME ====================
+
+function getWorkerHomeData(employeeId) {
+  const emp = getEmployee(employeeId);
+  const todayStr = today();
+
+  // Today's attendance
+  const allAttendance = getSheetData(TABS.ATTENDANCE);
+  const todayAtt = allAttendance.find(a =>
+    String(a.employee_id) === String(employeeId) && String(a.date) === todayStr
+  );
+
+  // Today's tasks
+  const allTasks = getSheetData(TABS.TASK_ASSIGNMENTS);
+  const todayTasks = allTasks.filter(t =>
+    String(t.employee_id) === String(employeeId) && String(t.date) === todayStr
+  ).map(formatTask);
+
+  // Today's reports
+  const allReports = getSheetData(TABS.DAILY_REPORTS);
+  const todayReports = allReports.filter(r =>
+    String(r.employee_id) === String(employeeId) && String(r.date) === todayStr
+  ).map(formatReport);
+
+  // Week schedule
+  const startOfWeek = new Date();
+  const dayOfWeek = startOfWeek.getDay() || 7;
+  startOfWeek.setDate(startOfWeek.getDate() - dayOfWeek + 1);
+  const weekStartStr = Utilities.formatDate(startOfWeek, TIMEZONE, 'yyyy-MM-dd');
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(endOfWeek.getDate() + 6);
+  const weekEndStr = Utilities.formatDate(endOfWeek, TIMEZONE, 'yyyy-MM-dd');
+
+  const allSchedules = getSheetData(TABS.SCHEDULES);
+  const weekSchedule = allSchedules.filter(s =>
+    String(s.employee_id) === String(employeeId) &&
+    String(s.date) >= weekStartStr && String(s.date) <= weekEndStr
+  ).map(formatSchedule);
+
+  // Pending requests
+  const pendingRequests = allSchedules.filter(s =>
+    String(s.employee_id) === String(employeeId) && String(s.status) === 'pending'
+  ).map(formatSchedule);
+
+  // This month summary
+  const now = new Date();
+  const monthStr = String(now.getMonth() + 1).padStart(2, '0');
+  const yearStr = String(now.getFullYear());
+  const monthPrefix = yearStr + '-' + monthStr;
+
+  const monthAttendance = allAttendance.filter(a =>
+    String(a.employee_id) === String(employeeId) && String(a.date).startsWith(monthPrefix)
+  );
+
+  let totalHours = 0;
+  let totalOvertime = 0;
+  monthAttendance.forEach(a => {
+    totalHours += Number(a.work_hours) || 0;
+    totalOvertime += Number(a.overtime_hours) || 0;
+  });
+
+  const overtimeRate = Number(getSettingValue('overtime_rate')) || 1.5;
+  const estimatedSalary = (totalHours * emp.hourly_rate) + (totalOvertime * emp.hourly_rate * overtimeRate);
+
+  return {
+    employee: emp,
+    today_attendance: todayAtt ? formatAttendance(todayAtt) : null,
+    today_tasks: todayTasks,
+    today_reports: todayReports,
+    week_schedule: weekSchedule,
+    pending_requests: pendingRequests,
+    this_month_summary: {
+      days_worked: monthAttendance.length,
+      total_hours: Math.round(totalHours * 100) / 100,
+      total_overtime: Math.round(totalOvertime * 100) / 100,
+      estimated_salary: Math.round(estimatedSalary),
+    },
+  };
+}
+// ==================== INITIALIZATION ====================
+
+/**
+ * Hàm này dùng để tạo tất cả các bảng và tiêu đề cột tự động.
+ * Người dùng chỉ cần chạy hàm này 1 lần duy nhất để bắt đầu.
+ */
+function setupDatabase() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  const setupTabs = [
+    { 
+      name: TABS.EMPLOYEES, 
+      headers: ['id', 'name', 'phone', 'type', 'skills', 'hourly_rate', 'status', 'joined_date', 'notes'],
+      sample: ['EMP001', 'Admin Test', '0900000000', 'fulltime', 'management', 50000, 'active', today(), 'Tài khoản test']
+    },
+    { 
+      name: TABS.ATTENDANCE, 
+      headers: ['id', 'employee_id', 'employee_name', 'date', 'shift', 'check_in', 'check_out', 'lunch_break_minutes', 'work_hours', 'overtime_hours', 'status', 'note'] 
+    },
+    { 
+      name: TABS.SCHEDULES, 
+      headers: ['id', 'employee_id', 'employee_name', 'date', 'shift', 'status', 'approved_by', 'reject_reason', 'note', 'created_at'] 
+    },
+    { 
+      name: TABS.DAILY_REPORTS, 
+      headers: ['id', 'employee_id', 'employee_name', 'date', 'order_id', 'order_code', 'product_line', 'stage_name', 'quantity_completed', 'quality_notes', 'issues', 'created_at'] 
+    },
+    { 
+      name: TABS.PRODUCT_LINES, 
+      headers: ['id', 'name', 'icon', 'color', 'amazon_sku_prefix', 'is_active'],
+      samples: [
+        ['PL001', 'Positive Jars - Standard', '📦', '#E8A87C', 'PJ-STD', 'TRUE'],
+        ['PL002', 'Soulful Spark - Mini', '✨', '#457B9D', 'SS-MIN', 'TRUE']
+      ]
+    },
+    { 
+      name: TABS.PRODUCTION_ORDERS, 
+      headers: ['id', 'order_code', 'product_line_id', 'product_line_name', 'quantity', 'current_stage', 'status', 'deadline', 'priority', 'notes', 'created_at'] 
+    },
+    { 
+      name: TABS.TASK_ASSIGNMENTS, 
+      headers: ['id', 'order_id', 'order_code', 'product_line_name', 'stage_number', 'stage_name', 'employee_id', 'employee_name', 'date', 'target_quantity', 'status', 'notes'] 
+    },
+    { 
+      name: TABS.SETTINGS, 
+      headers: ['key', 'value', 'description'],
+      samples: [
+        ['company_name', 'Positive Jar', 'Tên công ty hiển thị trên App'],
+        ['morning_shift_start', '08:00', 'Giờ vào ca sáng'],
+        ['morning_shift_end', '12:00', 'Giờ ra ca sáng'],
+        ['afternoon_shift_start', '13:30', 'Giờ vào ca chiều'],
+        ['afternoon_shift_end', '17:30', 'Giờ ra ca chiều'],
+        ['night_shift_start', '18:30', 'Giờ vào ca tối'],
+        ['night_shift_end', '21:30', 'Giờ ra ca tối'],
+        ['lunch_break_morning', '60', 'Phút nghỉ trưa ca sáng'],
+        ['lunch_break_afternoon', '0', 'Phút nghỉ trưa ca chiều'],
+        ['lunch_break_night', '0', 'Phút nghỉ trưa ca tối'],
+        ['standard_hours', '4', 'Số giờ làm việc chuẩn mỗi ca (để tính OT)'],
+        ['late_threshold_minutes', '15', 'Số phút cho phép trễ trước khi đánh dấu Late'],
+        ['overtime_rate', '1.5', 'Hệ số lương tăng ca'],
+        ['stages_list', 'Nguyên liệu, In ấn, Cắt dán, Lắp ráp, Kiểm tra, Đóng gói, Xuất kho', 'Danh sách các công đoạn sản xuất'],
+      ]
+    }
+  ];
+
+  setupTabs.forEach(tab => {
+    let sheet = ss.getSheetByName(tab.name);
+    if (!sheet) {
+      sheet = ss.insertSheet(tab.name);
+    }
+    sheet.clear();
+    sheet.appendRow(tab.headers);
+    
+    // Format headers
+    const headerRange = sheet.getRange(1, 1, 1, tab.headers.length);
+    headerRange.setBackground('#2D3348').setFontColor('#FFFFFF').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+
+    // Add samples if any
+    if (tab.sample) sheet.appendRow(tab.sample);
+    if (tab.samples) tab.samples.forEach(s => sheet.appendRow(s));
+
+    // Auto-resize columns
+    sheet.autoResizeColumns(1, tab.headers.length);
+  });
+
+  // Remove default sheet
+  const defaultSheet = ss.getSheetByName('Sheet1');
+  if (defaultSheet && ss.getSheets().length > 1) {
+    ss.deleteSheet(defaultSheet);
+  }
+
+  Logger.log('🎉 Đã thiết lập cơ sở dữ liệu thành công!');
+}

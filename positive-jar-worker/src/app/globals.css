@@ -1,0 +1,296 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* Nền */
+  --bg-page: #FAFAF8;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F5F3EF;
+  --bg: #FAFAF8;
+
+  /* Thương hiệu */
+  --brand: #C4764E;
+  --brand-light: #F7E8DC;
+  --brand-dark: #A35D38;
+  --primary: #C4764E;
+  --primary-light: #D4906A;
+  --primary-dark: #A35D38;
+
+  /* Phụ */
+  --accent: #5B8C7B;
+  --accent-light: #E8F0EC;
+
+  /* Text */
+  --text-main: #2C2C2C;
+  --text-sub: #7A7A72;
+  --text-muted: #B0AFA8;
+  --text: #2C2C2C;
+  --text-secondary: #7A7A72;
+
+  /* Trạng thái */
+  --success: #5B8C7B;
+  --warning: #D4A03C;
+  --danger: #C4553A;
+  --success-bg: #EDF5F0;
+  --warning-bg: #FFF8EB;
+  --danger-bg: #FDF0ED;
+
+  /* Border / Shadow */
+  --border: #E8E6E1;
+  --shadow-sm: 0 1px 3px rgba(44,44,44,0.06);
+  --shadow-md: 0 4px 12px rgba(44,44,44,0.08);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', sans-serif;
+  background: var(--bg-page);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.55;
+}
+
+/* Mobile-first container */
+.mobile-container {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  position: relative;
+}
+
+/* Cards */
+.card {
+  background: var(--bg-card);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.card-active {
+  border-color: var(--brand);
+  box-shadow: 0 4px 20px rgba(196,118,78,0.1);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Big action buttons */
+.btn-action {
+  width: 100%;
+  height: 54px;
+  border: none;
+  border-radius: 14px;
+  font-size: 16px;
+  font-weight: 700;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 80ms ease, box-shadow 0.2s;
+  font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', sans-serif;
+  box-shadow: 0 4px 14px rgba(196,118,78,0.25);
+}
+
+.btn-action:hover {
+  box-shadow: 0 6px 20px rgba(196,118,78,0.3);
+}
+
+.btn-action:active {
+  transform: scale(0.98);
+}
+
+.btn-checkin {
+  background: var(--brand);
+}
+
+.btn-checkout {
+  background: var(--danger);
+  box-shadow: 0 4px 14px rgba(196,85,58,0.25);
+}
+
+.btn-submit {
+  background: var(--brand);
+}
+
+.btn-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Badge */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+/* Avatar */
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 16px;
+  color: white;
+  flex-shrink: 0;
+}
+
+/* Shift buttons */
+.shift-btn {
+  flex: 1;
+  padding: 12px 8px;
+  border-radius: 14px;
+  border: 1.5px solid var(--border);
+  background: white;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', sans-serif;
+}
+
+.shift-btn.active {
+  border-color: var(--brand);
+  background: var(--brand-light);
+}
+
+.shift-btn:hover {
+  border-color: var(--brand);
+}
+
+/* Bottom Navigation */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  height: 64px;
+  background: white;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 50;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.03);
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  padding: 6px 12px;
+  text-decoration: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.nav-item.active {
+  color: var(--brand);
+}
+
+.nav-item svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.animate-pulse-custom {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, #F5F3EF 25%, #EBE9E4 50%, #F5F3EF 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes pulse-soft {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-soft 3s ease-in-out infinite;
+}
+
+/* Glow effects */
+.glow-brand {
+  box-shadow: 0 0 15px rgba(196,118,78,0.3);
+}
+
+.glow-success {
+  box-shadow: 0 0 15px rgba(91,140,123,0.3);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D1D0CB;
+  border-radius: 999px;
+}

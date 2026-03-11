@@ -1,0 +1,382 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* Nền */
+  --bg: #F7F6F3;
+  --bg-page: #F7F6F3;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F0EEEA;
+  --bg-sidebar: #FDFCFA;
+  --bg-input: #F5F3EF;
+
+  /* Thương hiệu */
+  --primary: #C4764E;
+  --primary-light: #D4906A;
+  --primary-dark: #A35D38;
+  --brand: #C4764E;
+  --brand-light: #F7E8DC;
+  --brand-dark: #A35D38;
+
+  /* Phụ */
+  --accent: #5B8C7B;
+  --accent-light: #E8F0EC;
+
+  /* Text */
+  --text: #2C2C2C;
+  --text-main: #2C2C2C;
+  --text-secondary: #6B6B63;
+  --text-sub: #6B6B63;
+  --text-muted: #A5A49D;
+
+  /* Trạng thái */
+  --success: #5B8C7B;
+  --warning: #D4A03C;
+  --danger: #C4553A;
+  --success-bg: #EDF5F0;
+  --warning-bg: #FFF8EB;
+  --danger-bg: #FDF0ED;
+
+  /* Border / Shadow */
+  --border: #E8E6E1;
+  --border-light: #D5D3CE;
+  --shadow-sm: 0 1px 3px rgba(44,44,44,0.06);
+  --shadow-md: 0 4px 12px rgba(44,44,44,0.08);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+
+/* Cards */
+.admin-card {
+  background: var(--bg-card);
+  border-radius: 14px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Stat cards */
+.stat-card {
+  background: var(--bg-card);
+  border-radius: 14px;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Tables */
+.admin-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.admin-table th {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-table th:first-child {
+  border-radius: 8px 0 0 0;
+}
+
+.admin-table th:last-child {
+  border-radius: 0 8px 0 0;
+}
+
+.admin-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.admin-table tr:hover td {
+  background: var(--bg-subtle);
+}
+
+/* Inputs */
+.admin-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-size: 14px;
+  font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', sans-serif;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.admin-input:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-light);
+}
+
+.admin-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Buttons */
+.admin-btn {
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', sans-serif;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-btn:hover {
+  transform: translateY(-1px);
+}
+
+.admin-btn-primary {
+  background: var(--brand);
+  color: white;
+  box-shadow: 0 2px 8px rgba(196,118,78,0.2);
+}
+
+.admin-btn-primary:hover {
+  box-shadow: 0 4px 14px rgba(196,118,78,0.3);
+}
+
+.admin-btn-accent {
+  background: var(--accent);
+  color: white;
+}
+
+.admin-btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.admin-btn-ghost {
+  background: transparent;
+  color: var(--text-sub);
+  border: 1px solid var(--border);
+}
+
+.admin-btn-ghost:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--brand-light);
+}
+
+/* Badge */
+.admin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+/* Tabs */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-subtle);
+  border-radius: 10px;
+  padding: 3px;
+  margin-bottom: 16px;
+}
+
+.admin-tab {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', sans-serif;
+  background: transparent;
+  color: var(--text-muted);
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.admin-tab.active {
+  background: white;
+  color: var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Sidebar */
+.sidebar {
+  width: 240px;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  overflow-y: auto;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: var(--text-sub);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s;
+  cursor: pointer;
+}
+
+.sidebar-item:hover {
+  background: var(--bg-subtle);
+  color: var(--text-main);
+}
+
+.sidebar-item.active {
+  background: var(--brand-light);
+  color: var(--brand-dark);
+  font-weight: 600;
+}
+
+/* Header */
+.admin-header {
+  height: 52px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+/* Main content */
+.admin-main {
+  margin-left: 240px;
+  min-height: 100vh;
+}
+
+.admin-content {
+  padding: 24px;
+}
+
+/* Loading skeleton */
+.admin-skeleton {
+  background: linear-gradient(90deg, #F0EEEA 25%, #E8E6E1 50%, #F0EEEA 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Kanban */
+.kanban-col {
+  min-width: 200px;
+  flex: 1;
+}
+
+.kanban-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.2s;
+  box-shadow: var(--shadow-sm);
+}
+
+.kanban-card:hover {
+  border-color: var(--brand);
+  box-shadow: var(--shadow-md);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D5D3CE;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .admin-main { margin-left: 0; }
+  .admin-content { padding: 16px; }
+}
+
+/* Animation */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-pulse-dot {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
