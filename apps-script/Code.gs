@@ -79,6 +79,7 @@ function routeAction(action, params) {
 
     // Task Assignments (Việc chung)
     getTodayTasks: () => getTodayTasks(),
+    getActiveTasks: () => getActiveTasks(),
     updateTaskProgress: () => updateTaskProgress(params.task_id, params.employee_id, parseInt(params.step_completed), parseInt(params.quantity_done) || 0, params.notes),
     addTaskQuantity: () => addTaskQuantity(params.task_id, params.employee_id, parseInt(params.quantity), params.notes),
     updateTaskStatus: () => updateTaskStatus(params.task_id, params.employee_id, params.status),
@@ -92,6 +93,7 @@ function routeAction(action, params) {
     addOrderWithTasks: () => addOrderWithTasks(params.data || params),
     updateOrderStage: () => updateOrderStage(params.id, parseInt(params.new_stage)),
     updateOrderStatus: () => updateOrderStatus(params.id, params.status),
+    addOrderProgress: () => addOrderProgress(params.order_id, params.employee_id, parseInt(params.quantity) || 0, params.note),
     getProductLines: () => getProductLines(),
     addProductLine: () => addProductLine(params.data || params),
     updateProductLine: () => updateProductLine(params.id, params.data || params),
@@ -262,18 +264,23 @@ function addEmployee(data) {
     if (exists.exists) throw new Error('Mã đăng nhập đã tồn tại: ' + pinCode);
   }
   
-  sheet.appendRow([
-    id,
-    data.name || '',
-    data.phone || '',
-    pinCode,
-    data.type || 'fulltime',
-    Array.isArray(data.skills) ? data.skills.join(',') : (data.skills || ''),
-    Number(data.hourly_rate) || 0,
-    'active',
-    data.joined_date || today(),
-    data.notes || '',
-  ]);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const newRow = new Array(headers.length).fill('');
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  if ('id' in hMap) newRow[hMap['id']] = id;
+  if ('name' in hMap) newRow[hMap['name']] = data.name || '';
+  if ('phone' in hMap) newRow[hMap['phone']] = data.phone || '';
+  if ('pin_code' in hMap) newRow[hMap['pin_code']] = pinCode;
+  if ('type' in hMap) newRow[hMap['type']] = data.type || 'fulltime';
+  if ('skills' in hMap) newRow[hMap['skills']] = Array.isArray(data.skills) ? data.skills.join(',') : (data.skills || '');
+  if ('hourly_rate' in hMap) newRow[hMap['hourly_rate']] = Number(data.hourly_rate) || 0;
+  if ('status' in hMap) newRow[hMap['status']] = 'active';
+  if ('joined_date' in hMap) newRow[hMap['joined_date']] = data.joined_date || today();
+  if ('notes' in hMap) newRow[hMap['notes']] = data.notes || '';
+
+  sheet.appendRow(newRow);
   return { id, pin_code: pinCode, message: 'Employee added' };
 }
 
@@ -744,6 +751,13 @@ function getTodayTasks() {
   ).map(formatTask);
 }
 
+function getActiveTasks() {
+  const data = getSheetData(TABS.TASKS);
+  return data.filter(t =>
+    String(t.status) !== 'completed' && String(t.status) !== '5'
+  ).map(formatTask);
+}
+
 function updateTaskProgress(taskId, employeeId, stepCompleted, quantityDone, notesStr) {
   const sheet = getSheet(TABS.TASKS);
   const rowIndex = findRowIndex(TABS.TASKS, taskId);
@@ -900,21 +914,26 @@ function addOrder(data) {
     if (pl) productLineName = pl.name;
   }
 
-  sheet.appendRow([
-    id,
-    orderCode,
-    data.product_line_id || '',
-    productLineName,
-    Number(data.quantity) || 0,
-    1,  // current_stage
-    5,  // total_stages
-    'pending', // status
-    data.deadline || '',
-    data.priority || 'medium',
-    data.notes || '',
-    now(), // created_at
-    '',  // completed_at
-  ]);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const newRow = new Array(headers.length).fill('');
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  if ('id' in hMap) newRow[hMap['id']] = id;
+  if ('order_code' in hMap) newRow[hMap['order_code']] = orderCode;
+  if ('product_line_id' in hMap) newRow[hMap['product_line_id']] = data.product_line_id || '';
+  if ('product_line_name' in hMap) newRow[hMap['product_line_name']] = productLineName;
+  if ('quantity' in hMap) newRow[hMap['quantity']] = Number(data.quantity) || 0;
+  if ('current_stage' in hMap) newRow[hMap['current_stage']] = 1;
+  if ('total_stages' in hMap) newRow[hMap['total_stages']] = 5;
+  if ('deadline' in hMap) newRow[hMap['deadline']] = data.deadline || '';
+  if ('priority' in hMap) newRow[hMap['priority']] = data.priority || 'medium';
+  if ('status' in hMap) newRow[hMap['status']] = 'pending';
+  if ('notes' in hMap) newRow[hMap['notes']] = data.notes || '';
+  if ('created_at' in hMap) newRow[hMap['created_at']] = now();
+  if ('completed_at' in hMap) newRow[hMap['completed_at']] = '';
+
+  sheet.appendRow(newRow);
 
   return { id, order_code: orderCode, message: 'Order created' };
 }
@@ -972,6 +991,37 @@ function updateOrderStage(id, newStage) {
   return { id, current_stage: newStage, message: 'Stage updated' };
 }
 
+function addOrderProgress(orderId, employeeId, quantity, userNote) {
+  if (!orderId || !employeeId) throw new Error('Missing required fields');
+  
+  const sheet = getSheet(TABS.PRODUCTION_ORDERS);
+  const rowIndex = findRowIndex(TABS.PRODUCTION_ORDERS, orderId);
+  if (rowIndex === -1) throw new Error('Order not found');
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  
+  // Get employee name
+  const empSheetDate = getSheetData(TABS.EMPLOYEES);
+  const employee = empSheetDate.find(e => String(e.id) === String(employeeId));
+  const empName = employee ? employee.name : 'Unknown';
+
+  let currentNotes = row[hMap['notes']] || '';
+  
+  const timeStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  let newLog = `[${timeStr}] ${empName}: +${quantity} SP`;
+  if (userNote) newLog += ` (${userNote})`;
+  
+  const updatedNotes = currentNotes ? currentNotes + '\n' + newLog : newLog;
+  row[hMap['notes']] = updatedNotes;
+  
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  return { id: orderId, message: 'Progress added' };
+}
+
 function updateOrderStatus(id, status) {
   const sheet = getSheet(TABS.PRODUCTION_ORDERS);
   const rowIndex = findRowIndex(TABS.PRODUCTION_ORDERS, id);
@@ -1019,14 +1069,19 @@ function addProductLine(data) {
   const nextNum = String(existing.length + 1).padStart(3, '0');
   const id = 'PL' + nextNum;
 
-  sheet.appendRow([
-    id,
-    data.name || '',
-    data.icon || '📦',
-    data.color || '#999999',
-    data.amazon_sku_prefix || '',
-    'TRUE',
-  ]);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const newRow = new Array(headers.length).fill('');
+  const hMap = {};
+  headers.forEach((h, i) => { hMap[String(h).trim().toLowerCase()] = i; });
+
+  if ('id' in hMap) newRow[hMap['id']] = id;
+  if ('name' in hMap) newRow[hMap['name']] = data.name || '';
+  if ('icon' in hMap) newRow[hMap['icon']] = data.icon || '📦';
+  if ('color' in hMap) newRow[hMap['color']] = data.color || '#999999';
+  if ('amazon_sku_prefix' in hMap) newRow[hMap['amazon_sku_prefix']] = data.amazon_sku_prefix || '';
+  if ('is_active' in hMap) newRow[hMap['is_active']] = 'TRUE';
+
+  sheet.appendRow(newRow);
 
   return { id, message: 'Product line added' };
 }

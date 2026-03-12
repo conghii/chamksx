@@ -48,7 +48,7 @@ export default function SchedulesPage() {
     setSubmitting(false);
   };
 
-  const activeOrders = orders?.filter(o => o.status === 'in_progress' || o.status === 'pending') || [];
+  const activeOrders = orders?.filter(o => o.status !== 'completed' && o.status !== 'cancelled') || [];
 
   return (
     <div>

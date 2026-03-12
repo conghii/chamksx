@@ -97,6 +97,7 @@ export const bulkApproveSchedules = (ids: string[], approved_by: string) =>
 // ==================== TASK ASSIGNMENT APIs ====================
 
 export const getTodayTasks = () => callGet<TaskAssignment[]>('getTodayTasks');
+export const getActiveTasks = () => callGet<TaskAssignment[]>('getActiveTasks');
 
 export const updateTaskProgress = (taskId: string, employeeId: string, stepCompleted: number, quantityDone: number, notesStr: string) =>
   callPost<{ id: string; status: string }>('updateTaskProgress', { task_id: taskId, employee_id: employeeId, step_completed: String(stepCompleted), quantity_done: String(quantityDone), notes: notesStr });
@@ -125,6 +126,9 @@ export const updateOrderStage = (id: string, new_stage: number) =>
 
 export const updateOrderStatus = (id: string, status: string) =>
   callPost<{ id: string }>('updateOrderStatus', { id, status });
+
+export const addOrderProgress = (order_id: string, employee_id: string, quantity: number, note: string) =>
+  callPost('addOrderProgress', { order_id, employee_id, quantity: String(quantity), note });
 
 export const getProductLines = () => callGet<ProductLine[]>('getProductLines');
 

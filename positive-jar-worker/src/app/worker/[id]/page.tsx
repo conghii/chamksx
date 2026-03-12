@@ -2,11 +2,11 @@
 
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getWorkerHomeData, checkIn, useAPI } from '@/lib/api';
-import { WorkerHomeData, TaskAssignment, STAGES, SHIFTS } from '@/types';
+import { getWorkerHomeData, checkIn, getOrders, useAPI } from '@/lib/api';
+import { WorkerHomeData, ProductionOrder, STAGES, SHIFTS, PRIORITIES } from '@/types';
 import { formatCurrency, formatHours, getDayOfWeekVN, formatDateVN, getInitials, getEmployeeTypeColor, getCurrentShift } from '@/lib/utils';
 import { ClipboardList, Calendar, ChevronRight, TrendingUp, Check, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 
 function RealtimeClock() {
   const [time, setTime] = useState('');
@@ -23,12 +23,30 @@ export default function WorkerHomePage() {
   const params = useParams();
   const id = params.id as string;
   const { data, loading, error, refetch } = useAPI<WorkerHomeData>(() => getWorkerHomeData(id), [id]);
+  const { data: ordersData, loading: ordersLoading, refetch: refetchOrders } = useAPI<ProductionOrder[]>(getOrders);
 
   const [selectedShift, setSelectedShift] = useState<string>(getCurrentShift());
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customHours, setCustomHours] = useState('');
+
+  // Handle active orders sorting
+  const activeOrders = useMemo(() => {
+    if (!ordersData) return [];
+    const PRIORITY_SCORE: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
+    
+    return ordersData
+      .filter(o => o.status !== 'completed' && o.status !== 'cancelled')
+      .sort((a, b) => {
+        const deadlineA = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+        const deadlineB = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+        if (deadlineA !== deadlineB) return deadlineA - deadlineB;
+        const prioA = PRIORITY_SCORE[a.priority || 'medium'] || 0;
+        const prioB = PRIORITY_SCORE[b.priority || 'medium'] || 0;
+        return prioB - prioA;
+      });
+  }, [ordersData]);
 
   const handleSubmitAttendance = async (shiftId?: string) => {
     const shift = shiftId || selectedShift;
@@ -41,6 +59,7 @@ export default function WorkerHomePage() {
       await checkIn(id, shift);
       setSubmitted(true);
       await refetch();
+      await refetchOrders();
     } catch (err) {
       alert('Lỗi gửi chấm công: ' + (err instanceof Error ? err.message : 'Unknown'));
     } finally {
@@ -60,6 +79,7 @@ export default function WorkerHomePage() {
       await checkIn(id, 'custom', hours);
       setSubmitted(true);
       await refetch();
+      await refetchOrders();
     } catch (err) {
       alert('Lỗi gửi chấm công: ' + (err instanceof Error ? err.message : 'Unknown'));
     } finally {
@@ -81,7 +101,7 @@ export default function WorkerHomePage() {
     </div>
   );
 
-  const { employee, today_attendance, today_tasks, week_schedule, this_month_summary } = data;
+  const { employee, today_attendance, week_schedule, this_month_summary } = data;
   const today = new Date();
 
   const alreadySubmitted = submitted || (!!today_attendance?.start_time && today_attendance.start_time.trim() !== '');
@@ -115,22 +135,21 @@ export default function WorkerHomePage() {
             
             {/* Shift Selection */}
             <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-main)', margin: '24px 0 12px' }}>Ca làm việc hôm nay của bạn?</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
               {SHIFTS.map(shift => (
                 <button
                   key={shift.id}
                   onClick={() => setSelectedShift(shift.id)}
                   className={`shift-btn ${selectedShift === shift.id ? 'active' : ''}`}
                   style={{ 
-                    position: 'relative',
-                    overflow: 'hidden',
+                    position: 'relative', overflow: 'hidden', padding: '12px 4px',
                     borderColor: selectedShift === shift.id ? 'var(--brand)' : 'var(--border)',
                     boxShadow: selectedShift === shift.id ? '0 4px 12px rgba(196,118,78,0.12)' : 'none'
                   }}
                 >
-                  <div style={{ fontSize: 24, marginBottom: 4 }}>{shift.icon}</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: selectedShift === shift.id ? 'var(--brand-dark)' : 'var(--text-main)' }}>{shift.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-sub)', marginTop: 2 }}>{shift.time}</div>
+                  <div style={{ fontSize: 20, marginBottom: 2 }}>{shift.icon}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: selectedShift === shift.id ? 'var(--brand-dark)' : 'var(--text-main)' }}>{shift.label}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-sub)' }}>{shift.time}</div>
                 </button>
               ))}
             </div>
@@ -184,49 +203,54 @@ export default function WorkerHomePage() {
         </div>
       )}
 
-      {/* Shared Tasks Module */}
+      {/* Active Orders Module */}
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ClipboardList size={18} color="var(--primary)" />
             <span style={{ fontWeight: 600, fontSize: 15 }}>
-              {today_tasks.length > 0 ? `Danh sách Việc Chung` : 'Chưa có thông báo việc chung'}
+              Đơn hàng đang sản xuất
             </span>
           </div>
           <Link href={`/worker/${id}/tasks`} style={{ color: 'var(--primary)', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
             Chi tiết <ChevronRight size={14} style={{ display: 'inline', verticalAlign: 'middle' }} />
           </Link>
         </div>
-        {today_tasks.length > 0 ? (
+        
+        {ordersLoading && <div className="skeleton" style={{ height: 60, borderRadius: 12 }} />}
+        
+        {!ordersLoading && activeOrders.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {today_tasks.slice(0, 3).map((task, idx) => {
-              const taskStatus = task.status;
-              const isTaskDone = taskStatus === '5' || taskStatus === 'completed';
+            {activeOrders.slice(0, 3).map((order: ProductionOrder, idx: number) => {
+              const pri = PRIORITIES.find(p => p.id === order.priority);
               return (
-                <div key={`${task.id}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderBottom: idx < 2 ? '1px solid var(--bg-subtle)' : 'none' }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: isTaskDone ? 'var(--success-bg)' : 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
-                    {isTaskDone ? '✅' : '📌'}
+                <div key={`${order.id}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderBottom: idx < 2 ? '1px solid var(--bg-subtle)' : 'none' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--brand-light)', color: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
+                    📦
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {task.description}
+                      {order.product_line_name}
                     </p>
-                    <p style={{ fontSize: 12, color: 'var(--text-sub)', margin: '2px 0 0', fontWeight: 500 }}>
-                       Đơn: {task.order_code || 'Chung'}
-                    </p>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-sub)' }}>{order.order_code}</span>
+                      {pri && <span style={{ fontSize: 10, background: `${pri.color}15`, color: pri.color, padding: '1px 4px', borderRadius: 4, fontWeight: 600 }}>{pri.label}</span>}
+                    </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: isTaskDone ? 'var(--success)' : 'var(--brand)' }}>
-                      {task.quantity_done}/{task.total_steps}
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand)' }}>
+                      SL: {order.quantity}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Sản phẩm</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>
+                      Hạn: {order.deadline}
+                    </div>
                   </div>
                 </div>
               );
             })}
           </div>
-        ) : (
-          <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, textAlign: 'center', padding: '8px 0' }}>🎉 Không có task nào trong hôm nay</p>
+        ) : !ordersLoading && (
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: 0, textAlign: 'center', padding: '8px 0' }}>🎉 Không có đơn hàng nào đang chạy</p>
         )}
       </div>
 
